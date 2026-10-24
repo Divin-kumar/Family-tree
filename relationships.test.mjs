@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { indexFamily } from './public/graph.js';
+import { indexFamily, layoutTree } from './public/graph.js';
 import { validate } from './validation.mjs';
 import {
   addNewPersonRelation,
@@ -147,4 +147,54 @@ test('self-parenting and circular ancestry roll back without changing existing f
   const snapshot = JSON.stringify(family);
   assert.throws(() => addParentToChild(family, { parentId: 'child', childId: 'mother' }), /ancestor/);
   assert.equal(JSON.stringify(family), snapshot);
+});
+
+test('tree layout keeps each generation under its recorded parents and groups siblings together', () => {
+  const family = {
+    name: 'Three generations',
+    people: [person('grandmother','female'), person('grandfather','male'), person('mother','female'), person('father','male'), child('first-child'), child('second-child'), child('grandchild')],
+    relationships: [
+      { from: 'grandmother', to: 'grandfather', type: 'partner' },
+      { from: 'grandmother', to: 'mother', type: 'parent' },
+      { from: 'grandfather', to: 'mother', type: 'parent' },
+      { from: 'mother', to: 'father', type: 'partner' },
+      { from: 'mother', to: 'first-child', type: 'parent' },
+      { from: 'father', to: 'first-child', type: 'parent' },
+      { from: 'mother', to: 'second-child', type: 'parent' },
+      { from: 'father', to: 'second-child', type: 'parent' },
+      { from: 'first-child', to: 'grandchild', type: 'parent' },
+    ],
+  };
+  const index = indexFamily(family);
+  const { pos } = layoutTree(index, family.people);
+  for (const edge of family.relationships.filter(edge => edge.type === 'parent')) {
+    assert.ok(pos.get(edge.to).y > pos.get(edge.from).y, `${edge.to} should be below ${edge.from}`);
+  }
+  assert.equal(pos.get('first-child').y, pos.get('second-child').y);
+  assert.equal(Math.abs(pos.get('first-child').x - pos.get('second-child').x), 212);
+  assert.equal(Math.abs(pos.get('grandmother').x - pos.get('grandfather').x), 212);
+});
+
+test('separate parent groups stay in separate lanes across a third generation', () => {
+  const family = {
+    name: 'Two family groups',
+    people: ['g1a','g1b','g2a','g2b','p1','p2','p3','p4','c1','c2','c3'].map(id => person(id)),
+    relationships: [
+      { from: 'g1a', to: 'g1b', type: 'partner' }, { from: 'g2a', to: 'g2b', type: 'partner' },
+      { from: 'g1a', to: 'p1', type: 'parent' }, { from: 'g1b', to: 'p1', type: 'parent' },
+      { from: 'g1a', to: 'p2', type: 'parent' }, { from: 'g1b', to: 'p2', type: 'parent' },
+      { from: 'g2a', to: 'p3', type: 'parent' }, { from: 'g2b', to: 'p3', type: 'parent' },
+      { from: 'g2a', to: 'p4', type: 'parent' }, { from: 'g2b', to: 'p4', type: 'parent' },
+      { from: 'p1', to: 'p3', type: 'partner' }, { from: 'p2', to: 'p4', type: 'partner' },
+      { from: 'p1', to: 'c1', type: 'parent' }, { from: 'p3', to: 'c1', type: 'parent' },
+      { from: 'p1', to: 'c2', type: 'parent' }, { from: 'p3', to: 'c2', type: 'parent' },
+      { from: 'p2', to: 'c3', type: 'parent' }, { from: 'p4', to: 'c3', type: 'parent' },
+    ],
+  };
+  const { pos } = layoutTree(indexFamily(family), family.people);
+  assert.ok(pos.get('p1').y > pos.get('g1a').y);
+  assert.ok(pos.get('c1').y > pos.get('p1').y);
+  assert.ok(pos.get('c2').y > pos.get('p3').y);
+  assert.equal(Math.abs(pos.get('c1').x - pos.get('c2').x), 212);
+  assert.ok(pos.get('c2').x < pos.get('c3').x);
 });
