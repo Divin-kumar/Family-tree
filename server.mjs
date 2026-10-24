@@ -2,12 +2,15 @@ import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { validate } from './validation.mjs';
+import { validate, normalizeFamily } from './validation.mjs';
 mkdirSync('data', { recursive: true });
 const db = new DatabaseSync('data/family.sqlite');
 db.exec('CREATE TABLE IF NOT EXISTS family (id INTEGER PRIMARY KEY, value TEXT NOT NULL)');
 const empty = { name: 'My family', people: [], relationships: [] };
 if (!db.prepare('SELECT id FROM family WHERE id=1').get()) db.prepare('INSERT INTO family VALUES (1, ?)').run(JSON.stringify(empty));
+const saved = db.prepare('SELECT value FROM family WHERE id=1').get();
+const normalized = normalizeFamily(JSON.parse(saved.value));
+if (normalized.changed) db.prepare('UPDATE family SET value=? WHERE id=1').run(JSON.stringify(normalized.value));
 const server = http.createServer(async (req, res) => {
   const send = (status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
   if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(403, { error: 'Origin not allowed' });
@@ -16,7 +19,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'PUT') {
       try {
         let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 12e6) throw Error('Family file is too large'); }
-        const family = JSON.parse(body); validate(family);
+        const family = normalizeFamily(JSON.parse(body)).value; validate(family);
         db.prepare('UPDATE family SET value=? WHERE id=1').run(JSON.stringify(family)); return send(200, { saved: true });
       } catch (e) { return send(400, { error: e.message }); }
     }
