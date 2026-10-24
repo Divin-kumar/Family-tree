@@ -38,6 +38,11 @@ export function normalizeFamily(input) {
     if('parentRole'in p){delete p.parentRole;changed=true;}
   }
   const people=new Map((value.people||[]).map(p=>[p.id,p]));
+  const seen=new Set();
+  value.relationships=(value.relationships||[]).filter(r=>{
+    const key=r.type==='partner'?`partner:${[r.from,r.to].sort().join(':')}`:`${r.type}:${r.from}:${r.to}`;
+    if(seen.has(key)){changed=true;return false;}seen.add(key);return true;
+  });
   for(const r of value.relationships||[])if(r.type==='parent'){
     const p=people.get(r.from),role=p?.sex==='female'?'Mother':p?.sex==='male'?'Father':'Parent';
     if(r.role!==role){r.role=role;changed=true;}
